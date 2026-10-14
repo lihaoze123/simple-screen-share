@@ -30,6 +30,27 @@ docker compose up -d --remove-orphans
 
 发布页通过同源 `/screen/whip` 请求 Caddy，再由 Caddy 转发到 MediaMTX 的 WebRTC 接口，无需配置发布页证书。
 
+### 使用 OBS 推流（替代网页发送端）
+
+使用支持 **WHIP** 的 OBS Studio，无需修改当前 Compose 配置。OBS 通过 `8889` 的 WHIP 接口发布到 `/screen`，接收端仍通过 `8892` 的 MoQ 页面观看。
+
+1. 先停止网页中的屏幕共享，避免网页和 OBS 同时向 `/screen` 发布。
+2. 在 OBS「来源」中添加屏幕采集源；Linux Wayland 使用「屏幕采集（PipeWire）」，选择要共享的屏幕。
+3. 打开「设置 → 推流」，将「服务」选择为 **WHIP**，按 OBS 所在电脑填写「服务器」：
+
+   | OBS 所在电脑 | 服务器地址 |
+   | --- | --- |
+   | 运行 Docker Compose 的 Linux 本机 | `http://localhost:8889/screen/whip` |
+   | 局域网中的其他电脑 | `http://192.168.1.10:8889/screen/whip` |
+
+   「Bearer Token」留空，当前服务未启用身份验证。远程推流时将示例 IP 替换成 Linux 的实际局域网 IP，并确保该电脑能访问 Linux 的 `8889/TCP` 和 `8189/UDP`。
+4. 建议视频使用 **H.264**、1080p、30 或 60fps，音频使用 **Opus**；若编码器可设置 B 帧，为兼容 WebRTC 接收将其设为 `0`。
+5. 保存设置，点击 OBS 的「开始推流」。Windows 浏览器打开 **https://192.168.1.10:8892/screen**，按下文处理首次访问的证书提示即可观看；WebRTC 接收地址仍为 **http://192.168.1.10:8889/screen**。
+
+OBS 的服务器地址必须包含 `/screen/whip`。`https://…:8892/screen` 是浏览器的 MoQ 接收地址，不能直接填入 OBS 的 WHIP 服务器栏。当前 Compose 关闭了 RTMP，因此这里使用 WHIP 推流。
+
+若「服务」列表中没有 WHIP，请安装带 WHIP 支持的 OBS 构建，参见 [OBS WHIP 指南](https://obsproject.com/kb/whip-streaming-guide)和 [MediaMTX OBS 指南](https://mediamtx.org/docs/publish/obs-studio)。
+
 ### Windows 接收端
 
 推荐使用 **MoQ（Media over QUIC）** 接收：
@@ -80,12 +101,14 @@ sudo ufw allow 8189/udp
 - **WebRTC 发布失败或接收黑屏**：检查 Linux 防火墙 `8189/udp`，确认两台电脑同网段、未启用 Wi-Fi 客户端隔离。
 - **502 错误**：运行 `docker compose logs mediamtx caddy` 检查后端是否启动。MediaMTX 固定为 `1.21.2`，其 MoQ 配置项与此 Compose 一致。
 - **100–300ms 延迟**：属于目标而非保证。建议有线网络、1080p、60fps；性能不足先降到 30fps（网页 `frameRate`），再调整码率。
-- **音频**：此版本仅传输屏幕视频，不传输桌面声音，以简化 Linux 跨桌面环境兼容性。
-- **停止**：点击停止共享，或运行 `docker compose down` 关闭服务。
+- **音频**：网页发送端只传输屏幕视频，不传输桌面声音；OBS 可通过 WHIP 传输已启用的桌面音频或麦克风，接收端按需取消静音。
+- **停止**：网页发送端点击「停止共享」，OBS 点击「停止推流」；也可运行 `docker compose down` 关闭服务。
 
 ## 官方文档
 
 - [Caddy 反向代理](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)
+- [OBS WHIP 推流指南](https://obsproject.com/kb/whip-streaming-guide)
+- [MediaMTX OBS 推流](https://mediamtx.org/docs/publish/obs-studio)
 - [MediaMTX 浏览器发布](https://mediamtx.org/docs/publish/web-browsers)
 - [MediaMTX 浏览器接收](https://mediamtx.org/docs/read/web-browsers)
 - [MediaMTX WebRTC](https://mediamtx.org/docs/features/webrtc-specific-features)
