@@ -1,0 +1,21 @@
+services:
+  mediamtx:
+    image: docker.io/bluenviron/mediamtx:1
+    container_name: lan-screenshare-mediamtx
+    network_mode: host  # Linux only: makes local-network WebRTC ICE simpler
+    restart: unless-stopped
+    environment:
+      MTX_RTSP: "false"
+      MTX_RTMP: "false"
+      MTX_HLS: "false"
+      MTX_SRT: "false"
+      MTX_MOQ: "true"
+
+  publish-page:
+    image: docker.io/library/nginx:alpine
+    container_name: lan-screenshare-page
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:80" # sender-only localhost: treated as secure by browser
+    volumes:
+      - ./web:/usr/share/nginx/html:ro

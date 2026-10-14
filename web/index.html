@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>局域网屏幕共享 · Linux 发布端</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui,-apple-system,sans-serif; }
+    body { margin: 0; background: #111827; color: #f9fafb; }
+    main { max-width: 700px; padding: 36px 22px; margin: 0 auto; }
+    h1 { font-size: 26px; margin: 0 0 12px; }
+    p { color: #cbd5e1; line-height: 1.6; }
+    button { padding: 12px 20px; background: #10b981; color: #061a13; border: 0;
+      border-radius: 8px; font-weight: 700; font-size: 16px; cursor: pointer; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    button.stop { background: #e5e7eb; margin-left: 8px; }
+    video { display: block; background: #020617; border: 1px solid #334155;
+      border-radius: 10px; width: 100%; max-height: 420px; margin-top: 22px; object-fit: contain; }
+    #status { margin-top: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    code { font-size: .94em; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Linux → Windows 屏幕共享</h1>
+  <p>点击「开始共享」，在浏览器弹窗中选择<strong>整个屏幕</strong>。Windows 端打开
+    <code>http://Linux局域网IP:8889/screen</code>，再按 F11 即可全屏。</p>
+  <button id="start">开始共享屏幕</button>
+  <button id="stop" class="stop" disabled>停止共享</button>
+  <p id="status" role="status">准备就绪。建议在 Chromium / Chrome 浏览器操作。</p>
+  <video id="preview" autoplay muted playsinline></video>
+</main>
+<script>
+(() => {
+  const startButton = document.getElementById('start');
+  const stopButton = document.getElementById('stop');
+  const status = document.getElementById('status');
+  const preview = document.getElementById('preview');
+  const url = 'http://localhost:8889/screen/whip';
+  let capture = null, pc = null, resourceUrl = null;
+
+  function setStatus(s) { status.textContent = s; }
+
+  function waitForIceGathering(peer) {
+    if (peer.iceGatheringState === 'complete') return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => { cleanup(); reject(new Error('ICE 候选收集超时')); }, 12000);
+      function check() {
+        if (peer.iceGatheringState === 'complete') { cleanup(); resolve(); }
+      }
+      function cleanup() { clearTimeout(timeout); peer.removeEventListener('icegatheringstatechange', check); }
+      peer.addEventListener('icegatheringstatechange', check);
+    });
+  }
+
+  async function stop() {
+    if (capture) capture.getTracks().forEach(t => t.stop());
+    capture = null;
+    if (pc) pc.close();
+    pc = null;
+    preview.srcObject = null;
+    startButton.disabled = false;
+    stopButton.disabled = true;
+    const previousUrl = resourceUrl;
+    resourceUrl = null;
+    if (previousUrl) {
+      try { await fetch(previousUrl, { method: 'DELETE' }); } catch (err) { /* session expires */ }
+    }
+    setStatus('屏幕共享已停止。');
+  }
+
+  async function start() {
+    startButton.disabled = true;
+    try {
+      if (!window.isSecureContext || !navigator.mediaDevices?.getDisplayMedia) {
+        throw new Error('请从 Linux 电脑本机打开 http://localhost:8090，推荐 Chrome/Chromium。');
+      }
+      // Must be called directly from user click to retain browser user-activation permission.
+      capture = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: 60, max: 60 } },
+        audio: false
+      });
+      capture.getVideoTracks()[0].addEventListener('ended', () => { void stop(); }, { once: true });
+      preview.srcObject = capture;
+      stopButton.disabled = false;
+      setStatus('正在建立局域网 WebRTC 连接…');
+
+      pc = new RTCPeerConnection({ iceServers: [] }); // LAN only; no external STUN needed
+      pc.addEventListener('connectionstatechange', () => {
+        if (!pc) return;
+        if (pc.connectionState === 'connected') {
+          setStatus('正在共享！Windows 打开 http://Linux局域网IP:8889/screen');
+        } else if (pc.connectionState === 'failed') {
+          setStatus('连接失败：请检查 8189/UDP 防火墙、设备是否在同一局域网。');
+        }
+      });
+      const track = capture.getVideoTracks()[0];
+      const transceiver = pc.addTransceiver(track, { direction: 'sendonly', streams: [capture] });
+      // Prefer H.264 for Windows/Chrome, otherwise use the default WebRTC codec.
+      if (transceiver.setCodecPreferences && RTCRtpSender.getCapabilities) {
+        const codecs = RTCRtpSender.getCapabilities('video')?.codecs || [];
+        const h264 = codecs.filter(c => c.mimeType.toLowerCase() === 'video/h264');
+        if (h264.length) transceiver.setCodecPreferences([...h264, ...codecs.filter(c => !h264.includes(c))]);
+      }
+      try {
+        const params = transceiver.sender.getParameters();
+        if (params.encodings?.length) {
+          params.encodings[0].maxBitrate = 8_000_000;
+          params.encodings[0].maxFramerate = 60;
+          await transceiver.sender.setParameters(params);
+        }
+      } catch (err) { /* browsers may reject bitrate configuration */ }
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await waitForIceGathering(pc);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/sdp' },
+        body: pc.localDescription.sdp
+      });
+      if (!response.ok) {
+        throw new Error('MediaMTX WHIP HTTP ' + response.status + ': ' + (await response.text()).slice(0, 250));
+      }
+      const location = response.headers.get('Location');
+      if (location) resourceUrl = new URL(location, url).href;
+      await pc.setRemoteDescription({ type: 'answer', sdp: await response.text() });
+      setStatus('已发布。Windows 打开 http://Linux局域网IP:8889/screen（若一直黑屏检查 UDP 8189）。');
+    } catch (err) {
+      const msg = err?.message || String(err);
+      await stop();
+      setStatus('共享失败：' + msg);
+    }
+  }
+  startButton.addEventListener('click', () => { void start(); });
+  stopButton.addEventListener('click', () => { void stop(); });
+  window.addEventListener('pagehide', () => {
+    if (capture) capture.getTracks().forEach(t => t.stop());
+    if (pc) pc.close();
+    // The server will reclaim the media session after the page closes.
+  });
+})();
+</script>
+</body>
+</html>
