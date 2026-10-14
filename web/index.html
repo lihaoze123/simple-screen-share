@@ -24,7 +24,9 @@
 <main>
   <h1>Linux → Windows 屏幕共享</h1>
   <p>点击「开始共享」，在浏览器弹窗中选择<strong>整个屏幕</strong>。Windows 端打开
-    <code>http://Linux局域网IP:8889/screen</code>，再按 F11 即可全屏。</p>
+    <code id="receiver-url">https://{{env "LAN_HOST"}}:8892/screen</code>（MoQ，实测更快），再按 F11 即可全屏。</p>
+  <p>MoQ 接收页使用 MediaMTX 自动生成的自签名证书，首次访问会有证书提示。
+    WebRTC 接收地址：<code>http://{{env "LAN_HOST"}}:8889/screen</code>。</p>
   <button id="start">开始共享屏幕</button>
   <button id="stop" class="stop" disabled>停止共享</button>
   <p id="status" role="status">准备就绪。建议在 Chromium / Chrome 浏览器操作。</p>
@@ -36,7 +38,8 @@
   const stopButton = document.getElementById('stop');
   const status = document.getElementById('status');
   const preview = document.getElementById('preview');
-  const url = 'http://localhost:8889/screen/whip';
+  const url = new URL('/screen/whip', window.location.href).href;
+  const receiverUrl = document.getElementById('receiver-url').textContent;
   let capture = null, pc = null, resourceUrl = null;
 
   function setStatus(s) { status.textContent = s; }
@@ -73,7 +76,7 @@
     startButton.disabled = true;
     try {
       if (!window.isSecureContext || !navigator.mediaDevices?.getDisplayMedia) {
-        throw new Error('请从 Linux 电脑本机打开 http://localhost:8090，推荐 Chrome/Chromium。');
+        throw new Error('请从 Linux 本机打开 http://localhost:8090，推荐 Chrome/Chromium。');
       }
       // Must be called directly from user click to retain browser user-activation permission.
       capture = await navigator.mediaDevices.getDisplayMedia({
@@ -89,7 +92,7 @@
       pc.addEventListener('connectionstatechange', () => {
         if (!pc) return;
         if (pc.connectionState === 'connected') {
-          setStatus('正在共享！Windows 打开 http://Linux局域网IP:8889/screen');
+          setStatus('正在共享！Windows 打开 ' + receiverUrl);
         } else if (pc.connectionState === 'failed') {
           setStatus('连接失败：请检查 8189/UDP 防火墙、设备是否在同一局域网。');
         }
@@ -125,7 +128,7 @@
       const location = response.headers.get('Location');
       if (location) resourceUrl = new URL(location, url).href;
       await pc.setRemoteDescription({ type: 'answer', sdp: await response.text() });
-      setStatus('已发布。Windows 打开 http://Linux局域网IP:8889/screen（若一直黑屏检查 UDP 8189）。');
+      setStatus('已发布。Windows 打开 ' + receiverUrl + '（MoQ 黑屏检查 8892/UDP；发布连接失败检查 8189/UDP）。');
     } catch (err) {
       const msg = err?.message || String(err);
       await stop();
