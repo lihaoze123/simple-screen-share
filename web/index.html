@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>局域网屏幕共享 · Linux 发布端</title>
+  <title>局域网屏幕共享 · 发布端</title>
   <style>
     :root { color-scheme: dark; font-family: system-ui,-apple-system,sans-serif; }
     body { margin: 0; background: #111827; color: #f9fafb; }
@@ -22,8 +22,8 @@
 </head>
 <body>
 <main>
-  <h1>Linux → Windows 屏幕共享</h1>
-  <p>点击「开始共享」，在浏览器弹窗中选择<strong>整个屏幕</strong>。Windows 端打开
+  <h1>局域网屏幕共享</h1>
+  <p>点击「开始共享」，在浏览器弹窗中选择<strong>整个屏幕</strong>。接收端打开
     <code id="receiver-url">https://{{env "LAN_HOST"}}:8892/screen</code>（MoQ，实测更快），再按 F11 即可全屏。</p>
   <p>MoQ 接收页使用 MediaMTX 自动生成的自签名证书，首次访问会有证书提示。
     WebRTC 接收地址：<code>http://{{env "LAN_HOST"}}:8889/screen</code>。</p>
@@ -76,7 +76,7 @@
     startButton.disabled = true;
     try {
       if (!window.isSecureContext || !navigator.mediaDevices?.getDisplayMedia) {
-        throw new Error('请从 Linux 本机打开 http://localhost:8090，推荐 Chrome/Chromium。');
+        throw new Error('请从运行服务的本机打开 http://localhost:8090，推荐 Chrome/Chromium。');
       }
       // Must be called directly from user click to retain browser user-activation permission.
       capture = await navigator.mediaDevices.getDisplayMedia({
@@ -92,14 +92,14 @@
       pc.addEventListener('connectionstatechange', () => {
         if (!pc) return;
         if (pc.connectionState === 'connected') {
-          setStatus('正在共享！Windows 打开 ' + receiverUrl);
+          setStatus('正在共享！接收端打开 ' + receiverUrl);
         } else if (pc.connectionState === 'failed') {
           setStatus('连接失败：请检查 8189/UDP 防火墙、设备是否在同一局域网。');
         }
       });
       const track = capture.getVideoTracks()[0];
       const transceiver = pc.addTransceiver(track, { direction: 'sendonly', streams: [capture] });
-      // Prefer H.264 for Windows/Chrome, otherwise use the default WebRTC codec.
+      // Prefer H.264 for browser compatibility, otherwise use the default WebRTC codec.
       if (transceiver.setCodecPreferences && RTCRtpSender.getCapabilities) {
         const codecs = RTCRtpSender.getCapabilities('video')?.codecs || [];
         const h264 = codecs.filter(c => c.mimeType.toLowerCase() === 'video/h264');
@@ -128,7 +128,7 @@
       const location = response.headers.get('Location');
       if (location) resourceUrl = new URL(location, url).href;
       await pc.setRemoteDescription({ type: 'answer', sdp: await response.text() });
-      setStatus('已发布。Windows 打开 ' + receiverUrl + '（MoQ 黑屏检查 8892/UDP；发布连接失败检查 8189/UDP）。');
+      setStatus('已发布。接收端打开 ' + receiverUrl + '（MoQ 黑屏检查 8892/UDP；发布连接失败检查 8189/UDP）。');
     } catch (err) {
       const msg = err?.message || String(err);
       await stop();

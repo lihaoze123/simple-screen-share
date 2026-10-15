@@ -2,7 +2,11 @@ services:
   mediamtx:
     image: docker.io/bluenviron/mediamtx:1.21.2
     container_name: lan-screenshare-mediamtx
-    network_mode: host  # Linux only: makes local-network WebRTC ICE simpler
+    ports:
+      - "8889:8889/tcp"
+      - "8892:8892/tcp"
+      - "8892:8892/udp"
+      - "8189:8189/udp"
     restart: unless-stopped
     environment:
       MTX_RTSP: "false"
@@ -11,6 +15,9 @@ services:
       MTX_SRT: "false"
       MTX_MOQ: "true"
       MTX_WEBRTCADDRESS: ":8889"
+      MTX_WEBRTCLOCALUDPADDRESS: ":8189"
+      MTX_WEBRTCIPSFROMINTERFACES: "false"
+      MTX_WEBRTCADDITIONALHOSTS: "${LAN_HOST:?Set LAN_HOST to the server LAN IP in .env},127.0.0.1"
       MTX_MOQHTTP2ADDRESS: ":8892"
       MTX_MOQHTTP3ADDRESS: ":8892"
       MTX_MOQQUICADDRESS: "127.0.0.1:8893"
@@ -20,12 +27,13 @@ services:
   caddy:
     image: docker.io/library/caddy:2-alpine
     container_name: lan-screenshare-caddy
-    network_mode: host
+    ports:
+      - "127.0.0.1:8090:8090/tcp"
     restart: unless-stopped
     depends_on:
       - mediamtx
     environment:
-      LAN_HOST: "${LAN_HOST:?Set LAN_HOST to the Linux LAN IP in .env}"
+      LAN_HOST: "${LAN_HOST:?Set LAN_HOST to the server LAN IP in .env}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./web:/srv:ro
